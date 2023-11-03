@@ -546,17 +546,13 @@ groupReduceWithOffset offset w lam arrs = do
         let i = local_tid + tvExp offset
         copyDWIMFix (paramName param) [] (Var arr) [sExt64 i]
 
-      writeReduceOpResult param arr
-        | Prim _ <- paramType param =
-            copyDWIMFix arr [sExt64 local_tid] (Var $ paramName param) []
-        | otherwise =
-            pure ()
+      writeReduceOpResult param arr =
+        when (primType $ paramType param) $
+          copyDWIMFix arr [sExt64 local_tid] (Var $ paramName param) []
 
-      writeArrayOpResult param arr
-        | Prim _ <- paramType param =
-            pure ()
-        | otherwise =
-            copyDWIMFix arr [0] (Var $ paramName param) []
+      writeArrayOpResult param arr =
+        unless (primType $ paramType param) $
+          copyDWIMFix arr [0] (Var $ paramName param) []
 
   let (reduce_acc_params, reduce_arr_params) =
         splitAt (length arrs) $ lambdaParams lam
@@ -597,7 +593,7 @@ groupReduceWithOffset offset w lam arrs = do
           sWhen
             (arg_in_bounds .&&. apply_in_in_wave_iteration)
             in_wave_reduce
-          offset <-- tvExp offset * 2
+          offset <-- tvExp offset .<<. 1
 
       doing_cross_wave_reductions =
         tvExp skip_waves .<. num_waves
@@ -612,16 +608,19 @@ groupReduceWithOffset offset w lam arrs = do
           barrier
           offset <-- tvExp skip_waves * wave_size
           sWhen apply_in_cross_wave_iteration do_reduce
-          skip_waves <-- tvExp skip_waves * 2
+          skip_waves <-- tvExp skip_waves .<<. 1
 
   in_wave_reductions
   cross_wave_reductions
   errorsync
 
-  sComment "Copy array-typed operands to result array" $ do
-    sWhen (local_tid .==. 0) $
-      localOps threadOperations $
-        zipWithM_ writeArrayOpResult reduce_acc_params arrs
+
+  -- write array-typed ops to result, if any
+  unless (all (primType . paramType) reduce_acc_params) $
+    sComment "Copy array-typed operands to result array" $ do
+      sWhen (local_tid .==. 0) $
+        localOps threadOperations $
+          zipWithM_ writeArrayOpResult reduce_acc_params arrs
 
 compileThreadOp :: OpCompiler GPUMem KernelEnv Imp.KernelOp
 compileThreadOp pat (Alloc size space) =
@@ -915,7 +914,7 @@ kernelInitialisationSimple ::
 kernelInitialisationSimple num_groups group_size = do
   global_tid <- newVName "global_tid"
   local_tid <- newVName "local_tid"
-  group_id <- newVName "group_tid"
+  group_id <- newVName "group_id"
   wave_size <- newVName "wave_size"
   inner_group_size <- newVName "group_size"
   let num_groups' = Imp.pe64 (unCount num_groups)
