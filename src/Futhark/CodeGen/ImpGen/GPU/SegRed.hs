@@ -60,7 +60,7 @@ import Futhark.Error
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Transform.Rename
-import Futhark.Util (chunks)
+import Futhark.Util (chunks, concatMapM)
 import Futhark.Util.IntegralExp (divUp, quot, rem)
 import Prelude hiding (quot, rem)
 
@@ -132,53 +132,56 @@ compileSegRed' pat grid space reds body
 -- global memory.  Allocations for the former have already been
 -- performed.  This policy is baked into how the allocations are done
 -- in ExplicitAllocations.
+
+-- intermediateArrays ::
+--   Count GroupSize SubExp ->
+--   SubExp ->
+--   SegBinOp GPUMem ->
+--   InKernelGen [VName]
+-- intermediateArrays (Count group_size) num_threads (SegBinOp _ red_op nes _) = do
+--   let red_op_params = lambdaParams red_op
+--       red_acc_params = take (length nes) red_op_params
+--   traceM $ "red_op_params: " ++ (prettyString red_op_params)
+--   forM red_acc_params $ \p -> do
+--     case paramDec p of
+--       -- TODO: do we need to change this one? perhaps the `num_threads` in
+--       -- `Shape [num_threads]`..?
+--       MemArray pt shape _ (ArrayIn mem _) -> do
+--         let shape' = Shape [num_threads] <> shape
+--         sArray "red_arr" pt shape' mem $
+--           LMAD.iota 0 (map pe64 $ shapeDims shape')
+--       _ -> do
+--         let pt = elemType $ paramType p
+--             shape = Shape [group_size]
+--         sAllocArray "red_arr" pt shape $ Space "local"
+
 intermediateArrays ::
   Count GroupSize SubExp ->
   SubExp ->
-  SegBinOp GPUMem ->
-  InKernelGen [VName]
-intermediateArrays (Count group_size) num_threads (SegBinOp _ red_op nes _) = do
-  let red_op_params = lambdaParams red_op
-      red_acc_params = take (length nes) red_op_params
-  traceM $ "red_op_params: " ++ (prettyString red_op_params)
-  forM red_acc_params $ \p -> do
-    case paramDec p of
-      -- TODO: do we need to change this one? perhaps the `num_threads` in
-      -- `Shape [num_threads]`..?
-      MemArray pt shape _ (ArrayIn mem _) -> do
-        let shape' = Shape [num_threads] <> shape
-        sArray "red_arr" pt shape' mem $
-          LMAD.iota 0 (map pe64 $ shapeDims shape')
-      _ -> do
-        let pt = elemType $ paramType p
-            shape = Shape [group_size]
-        sAllocArray "red_arr" pt shape $ Space "local"
+  [SegBinOp GPUMem] ->
+  InKernelGen [[VName]]
+intermediateArrays (Count group_size) num_threads segbinops =
+  mapM (f (binopsComm segbinops) group_size num_threads) segbinops 
+  where 
+    f Commutative group_size num_threads (SegBinOp _ red_op nes _) = do
+      let red_acc_params = take (length nes) $ lambdaParams red_op
+      forM red_acc_params $ \p ->
+        case paramDec p of
+          MemArray pt shape _ (ArrayIn mem _) -> do
+            let shape' = Shape [num_threads] <> shape
+            sArray "red_arr" pt shape' mem $
+              LMAD.iota 0 (map pe64 $ shapeDims shape')
+          _ -> do
+            let pt = elemType $ paramType p
+                shape = Shape [group_size]
+            sAllocArray "red_arr" pt shape $ Space "local"
+    f _ _ _ _ = undefined
+
 
 
 elems_per_thread :: (Num a) => a
 elems_per_thread = 12
 
--- TODO: when it works for the noncommutative case, merge this with
--- intermediateArrays.
-intermediateArraysNoncomm ::
-  Count GroupSize SubExp ->
-  SubExp ->
-  SegBinOp GPUMem ->
-  InKernelGen [VName]
-intermediateArraysNoncomm (Count group_size) num_threads (SegBinOp _ red_op nes _) = do
-  let red_acc_params = take (length nes) $ lambdaParams red_op
-  forM red_acc_params $ \p -> do
-    case paramDec p of
-      -- TODO: do we need to change this one? perhaps the `num_threads` in
-      -- `Shape [num_threads]` ..?
-      MemArray pt shape _ (ArrayIn mem _) -> do
-        let shape' = Shape [num_threads] <> shape
-        sArray "red_arr" pt shape' mem $
-          LMAD.iota 0 (map pe64 $ shapeDims shape')
-      _ -> do
-        let pt = elemType $ paramType p
-            shape = Shape [group_size]
-        sAllocArray "red_arr" pt shape $ Space "local"
 
 -- | Arrays for storing group results.
 --
@@ -232,8 +235,8 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
   sKernelThread "segred_nonseg" (segFlat space) (defKernelAttrs num_groups group_size) $ do
     constants <- kernelConstants <$> askEnv
     sync_arr <- sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
-    reds_arrs <- mapM (intermediateArraysNoncomm group_size (tvSize num_threads)) reds
-    -- reds_arrs <- mapM (intermediateArrays group_size (tvSize num_threads)) reds
+    reds_arrs <- intermediateArrays Commutative group_size (tvSize num_threads) reds
+
 
     -- Since this is the nonsegmented case, all outer segment IDs must
     -- necessarily be 0.
@@ -319,7 +322,7 @@ smallSegmentsReduction (Pat segred_pes) num_groups group_size space reds body = 
 
   sKernelThread "segred_small" (segFlat space) (defKernelAttrs num_groups group_size) $ do
     constants <- kernelConstants <$> askEnv
-    reds_arrs <- mapM (intermediateArrays group_size (tvSize num_threads)) reds
+    reds_arrs <- intermediateArrays Commutative group_size (tvSize num_threads) reds
 
     -- We probably do not have enough actual workgroups to cover the
     -- entire iteration space.  Some groups thus have to perform double
@@ -462,7 +465,7 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
 
   sKernelThread "segred_large" (segFlat space) (defKernelAttrs num_groups group_size) $ do
     constants <- kernelConstants <$> askEnv
-    reds_arrs <- mapM (intermediateArrays group_size (tvSize num_threads)) reds
+    reds_arrs <- intermediateArrays Commutative group_size (tvSize num_threads) reds
     sync_arr <- sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
 
     -- We probably do not have enough actual workgroups to cover the
@@ -582,7 +585,11 @@ slugShape :: SegBinOpSlug -> Shape
 slugShape = segBinOpShape . slugOp
 
 slugsComm :: [SegBinOpSlug] -> Commutativity
-slugsComm = mconcat . map (segBinOpComm . slugOp)
+slugsComm = binopsComm . map slugOp
+
+binopsComm :: [SegBinOp GPUMem] -> Commutativity
+binopsComm = mconcat . map segBinOpComm
+
 
 accParams, nextParams :: SegBinOpSlug -> [LParam GPUMem]
 accParams slug = take (length (slugNeutral slug)) $ slugParams slug
