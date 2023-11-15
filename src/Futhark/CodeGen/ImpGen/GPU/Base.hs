@@ -952,9 +952,7 @@ kernelInitialisationSimple num_groups group_size = do
   pure (constants, set_constants)
 
 isActive :: [(VName, SubExp)] -> Imp.TExp Bool
-isActive limit = case actives of
-  [] -> true
-  x : xs -> foldl (.&&.) x xs
+isActive limit = foldl (.&&.) true actives
   where
     (is, ws) = unzip limit
     actives = zipWith active is $ map pe64 ws
