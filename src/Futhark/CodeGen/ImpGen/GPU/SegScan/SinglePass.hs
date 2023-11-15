@@ -15,8 +15,8 @@ import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Transform.Rename
-import Futhark.Util (mapAccumLM, takeLast)
-import Futhark.Util.IntegralExp (IntegralExp (mod, rem), divUp, quot)
+import Futhark.Util (forAccumLM, takeLast)
+import Futhark.Util.IntegralExp (IntegralExp (mod, rem), divUp, quot, nextMul)
 import Prelude hiding (mod, quot, rem)
 
 
@@ -26,8 +26,6 @@ xParams scan =
 yParams scan =
   drop (length (segBinOpNeutral scan)) (lambdaParams (segBinOpLambda scan))
 
-alignTo :: (IntegralExp a) => a -> a -> a
-alignTo x a = (x `divUp` a) * a
 
 createLocalArrays ::
   Count GroupSize SubExp ->
@@ -37,37 +35,40 @@ createLocalArrays ::
 createLocalArrays (Count groupSize) chunk types = do
   let groupSizeE = pe64 groupSize
       workSize = pe64 chunk * groupSizeE
+      elem_sizes = map primByteSize types
       prefixArraysSize =
-        foldl (\acc tySize -> alignTo acc tySize + tySize * groupSizeE) 0 $
-          map primByteSize types
+        foldl (\acc ty_size -> nextMul acc ty_size + ty_size * groupSizeE) 0
+          elem_sizes
       maxTransposedArraySize =
         foldl1 sMax64 $ map (\ty -> workSize * primByteSize ty) types
+        -- workSize * maximum elem_sizes
 
       warpSize :: (Num a) => a
+      -- TODO: why does this not use kernelWaveSize constants? do HIP devices
+      -- use warp size 32?
       warpSize = 32
       maxWarpExchangeSize =
-        foldl (\acc tySize -> alignTo acc tySize + tySize * fromInteger warpSize) 0 $
-          map primByteSize types
+        foldl (\acc ty_size -> nextMul acc ty_size + ty_size * warpSize) 0
+          elem_sizes
       maxLookbackSize = maxWarpExchangeSize + warpSize
       size = Imp.bytes $ maxLookbackSize `sMax64` prefixArraysSize `sMax64` maxTransposedArraySize
 
   (_, byteOffsets) <-
-    mapAccumLM
-      ( \off tySize -> do
-          off' <- dPrimVE "byte_offsets" $ alignTo off tySize + pe64 groupSize * tySize
-          pure (off', off)
-      )
+    forAccumLM
       0
-      $ map primByteSize types
+      elem_sizes $
+      \off ty_size -> do
+        off' <- dPrimVE "byte_offsets" $ nextMul off ty_size + pe64 groupSize * ty_size
+        pure (off', off)
+
 
   (_, warpByteOffsets) <-
-    mapAccumLM
-      ( \off tySize -> do
-          off' <- dPrimVE "warp_byte_offset" $ alignTo off tySize + warpSize * tySize
-          pure (off', off)
-      )
+    forAccumLM
       warpSize
-      $ map primByteSize types
+      elem_sizes $
+      \off ty_size -> do
+        off' <- dPrimVE "warp_byte_offset" $ nextMul off ty_size + warpSize * ty_size
+        pure (off', off)
 
   sComment "Allocate reusable shared memory" $ pure ()
 
