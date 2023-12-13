@@ -516,6 +516,8 @@ test-suite unit
       Futhark.IR.Mem.IxFun.Alg
       Futhark.IR.Mem.IxFunTests
       Futhark.IR.Mem.IxFunWrapper
+      Futhark.Solve.BranchAndBoundTests
+      Futhark.Solve.SimplexTests
       Language.Futhark.CoreTests
       Language.Futhark.PrimitiveTests
       Language.Futhark.SyntaxTests
@@ -534,3 +536,4 @@ test-suite unit
     , tasty-hunit
     , tasty-quickcheck
     , text
+    , vector
