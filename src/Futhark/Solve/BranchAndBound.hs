@@ -2,6 +2,7 @@ module Futhark.Solve.BranchAndBound (branchAndBound) where
 
 import Data.Map qualified as M
 import Data.Maybe
+import Data.Set qualified as S
 import Data.Vector.Unboxed (Unbox, Vector)
 import Data.Vector.Unboxed qualified as V
 import Futhark.Solve.LP (LP (..))
@@ -9,6 +10,7 @@ import Futhark.Solve.Matrix
 import Futhark.Solve.Simplex
 
 newtype Bound a = Bound (Maybe a, Maybe a)
+  deriving (Eq, Ord)
 
 instance (Ord a) => Semigroup (Bound a) where
   Bound (mlb1, mub1) <> Bound (mlb2, mub2) =
@@ -26,23 +28,28 @@ branchAndBound ::
   Maybe (a, Vector a)
 branchAndBound prob@(LP _ a d) = (zopt,) <$> mopt
   where
-    (zopt, mopt) = step [mempty] (negate $ read "Infinity") Nothing
-    step [] zlow opt = (zlow, opt)
-    step (next : todo) zlow opt =
-      case simplexLP (mkProblem next) of
-        Nothing -> step todo zlow opt
-        Just (z, sol)
-          | z <= zlow -> step todo zlow opt
-          | V.all isInt sol ->
-              step todo z (Just sol)
-          | otherwise ->
-              let (idx, frac) =
-                    V.head $ V.filter (not . isInt . snd) $ V.zip (V.generate (V.length sol) id) sol
-                  new_todo =
-                    [ M.insertWith (<>) idx (Bound (Nothing, Just $ fromInteger $ floor frac)) next,
-                      M.insertWith (<>) idx (Bound (Just $ fromInteger $ ceiling frac, Nothing)) next
-                    ]
-               in step (new_todo ++ todo) zlow opt
+    (zopt, mopt) = step (S.singleton mempty) (negate $ read "Infinity") Nothing
+    step todo zlow opt
+      | S.null todo = (zlow, opt)
+      | otherwise =
+          let (next, rest) = S.deleteFindMin todo
+           in case simplexLP (mkProblem next) of
+                Nothing -> step rest zlow opt
+                Just (z, sol)
+                  | z <= zlow -> step rest zlow opt
+                  | V.all isInt sol ->
+                      step rest z (Just sol)
+                  | otherwise ->
+                      let (idx, frac) =
+                            V.head $ V.filter (not . isInt . snd) $ V.zip (V.generate (V.length sol) id) sol
+                          new_todo =
+                            S.fromList $
+                              filter
+                                (/= next)
+                                [ M.insertWith (<>) idx (Bound (Nothing, Just $ fromInteger $ floor frac)) next,
+                                  M.insertWith (<>) idx (Bound (Just $ fromInteger $ ceiling frac, Nothing)) next
+                                ]
+                       in step (new_todo <> rest) zlow opt
 
     isInt x = x == fromInteger (round x)
     mkProblem =
