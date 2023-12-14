@@ -3,6 +3,7 @@ module Futhark.Solve.Matrix
     toList,
     toLists,
     fromVector,
+    fromVectors,
     fromLists,
     (@),
     (!),
@@ -58,6 +59,14 @@ fromVector v =
     { elems = v,
       nrows = 1,
       ncols = V.length v
+    }
+
+fromVectors :: (Unbox a) => [Vector a] -> Matrix a
+fromVectors vs =
+  Matrix
+    { elems = V.concat $ vs,
+      nrows = length vs,
+      ncols = V.length $ head vs
     }
 
 fromLists :: (Unbox a) => [[a]] -> Matrix a

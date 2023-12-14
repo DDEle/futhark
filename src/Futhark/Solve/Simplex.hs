@@ -7,7 +7,7 @@ where
 import Data.List qualified as L
 import Data.Vector.Unboxed (Unbox, Vector)
 import Data.Vector.Unboxed qualified as V
-import Futhark.Solve.LP
+import Futhark.Solve.LP (LP (..), LPE (..), convert)
 import Futhark.Solve.Matrix
 
 -- | A tableau of an equational linear program @a * x = d@ is
