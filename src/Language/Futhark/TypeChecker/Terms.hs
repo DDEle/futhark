@@ -33,6 +33,7 @@ import Language.Futhark
 import Language.Futhark.Primitive (intByteSize)
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Consumption qualified as Consumption
+import Language.Futhark.TypeChecker.Definitions
 import Language.Futhark.TypeChecker.Match
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)
 import Language.Futhark.TypeChecker.Terms.Loop
@@ -1335,64 +1336,64 @@ localChecks = void . check
 -- | Type-check a top-level (or module-level) function definition.
 -- Despite the name, this is also used for checking constant
 -- definitions, by treating them as 0-ary functions.
-checkFunDef ::
-  ( Name,
-    Maybe UncheckedTypeExp,
-    [UncheckedTypeParam],
-    [UncheckedPat ParamType],
-    UncheckedExp,
-    SrcLoc
-  ) ->
-  TypeM
-    ( VName,
-      [TypeParam],
-      [Pat ParamType],
-      Maybe (TypeExp Info VName),
-      ResRetType,
-      Exp
-    )
-checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
-  runTermTypeM checkExp $ do
-    (tparams', params', maybe_retdecl', RetType dims rettype', body') <-
-      checkBinding (fname, maybe_retdecl, tparams, params, body, loc)
-
-    -- Since this is a top-level function, we also resolve overloaded
-    -- types, using either defaults or complaining about ambiguities.
-    fixOverloadedTypes $
-      typeVars rettype' <> foldMap (typeVars . patternType) params'
-
-    -- Then replace all inferred types in the body and parameters.
-    body'' <- updateTypes body'
-    params'' <- updateTypes params'
-    maybe_retdecl'' <- traverse updateTypes maybe_retdecl'
-    rettype'' <- normTypeFully rettype'
-
-    -- Check if the function body can actually be evaluated.
-    causalityCheck body''
-
-    -- Check for various problems.
-    mapM_ (mustBeIrrefutable . fmap toStruct) params'
-    localChecks body''
-
-    bindSpaced [(Term, fname)] $ do
-      fname' <- checkName Term fname loc
-      when (fname `elem` doNotShadow) $
-        typeError loc mempty . withIndexLink "may-not-be-redefined" $
-          "The" <+> prettyName fname <+> "operator may not be redefined."
-
-      let ((body''', updated_ret), errors) =
-            Consumption.checkValDef
-              ( fname',
-                params'',
-                body'',
-                RetType dims rettype'',
-                maybe_retdecl'',
-                loc
-              )
-
-      mapM_ throwError errors
-
-      pure (fname', tparams', params'', maybe_retdecl'', updated_ret, body''')
+-- checkFunDef ::
+--  ( Name,
+--    Maybe UncheckedTypeExp,
+--    [UncheckedTypeParam],
+--    [UncheckedPat ParamType],
+--    UncheckedExp,
+--    SrcLoc
+--  ) ->
+--  TypeM
+--    ( VName,
+--      [TypeParam],
+--      [Pat ParamType],
+--      Maybe (TypeExp Info VName),
+--      ResRetType,
+--      Exp
+--    )
+-- checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
+--  runTermTypeM checkExp $ do
+--    (tparams', params', maybe_retdecl', RetType dims rettype', body') <-
+--      checkBinding (fname, maybe_retdecl, tparams, params, body, loc)
+--
+--    -- Since this is a top-level function, we also resolve overloaded
+--    -- types, using either defaults or complaining about ambiguities.
+--    fixOverloadedTypes $
+--      typeVars rettype' <> foldMap (typeVars . patternType) params'
+--
+--    -- Then replace all inferred types in the body and parameters.
+--    body'' <- updateTypes body'
+--    params'' <- updateTypes params'
+--    maybe_retdecl'' <- traverse updateTypes maybe_retdecl'
+--    rettype'' <- normTypeFully rettype'
+--
+--    -- Check if the function body can actually be evaluated.
+--    causalityCheck body''
+--
+--    -- Check for various problems.
+--    mapM_ (mustBeIrrefutable . fmap toStruct) params'
+--    localChecks body''
+--
+--    bindSpaced [(Term, fname)] $ do
+--      fname' <- checkName Term fname loc
+--      when (fname `elem` doNotShadow) $
+--        typeError loc mempty . withIndexLink "may-not-be-redefined" $
+--          "The" <+> prettyName fname <+> "operator may not be redefined."
+--
+--      let ((body''', updated_ret), errors) =
+--            Consumption.checkValDef
+--              ( fname',
+--                params'',
+--                body'',
+--                RetType dims rettype'',
+--                maybe_retdecl'',
+--                loc
+--              )
+--
+--      mapM_ throwError errors
+--
+--      pure (fname', tparams', params'', maybe_retdecl'', updated_ret, body''')
 
 -- | This is "fixing" as in "setting them", not "correcting them".  We
 -- only make very conservative fixing.
