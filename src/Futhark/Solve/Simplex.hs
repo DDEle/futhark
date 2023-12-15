@@ -1,13 +1,17 @@
 module Futhark.Solve.Simplex
   ( simplex,
     simplexLP,
+    simplexProg,
   )
 where
 
 import Data.List qualified as L
+import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as M
 import Data.Vector.Unboxed (Unbox, Vector)
 import Data.Vector.Unboxed qualified as V
-import Futhark.Solve.LP (LP (..), LPE (..), convert)
+import Debug.Trace
+import Futhark.Solve.LP (LP (..), LPE (..), LinearProg (..), convert, linearProgToLPE, rowEchelonLPE)
 import Futhark.Solve.Matrix
 
 -- | A tableau of an equational linear program @a * x = d@ is
@@ -80,13 +84,19 @@ findBasis ::
   Maybe (LPE a, Matrix a, Vector a, Vector Int, Vector Int)
 findBasis prob = do
   (invA_B, p, b, n) <- step p_aux (invA_B_aux, d_aux, b_aux, n_aux)
-  let prob' =
+  let bsol =
+        V.map snd $
+          V.fromList $
+            L.sortOn fst $
+              V.toList $
+                V.zip (V.filter (>= ncols (pA prob)) b) (p V.++ V.replicate (V.length n) 0)
+      prob' =
         prob
           { pc = pc prob,
             pA = sliceCols (V.generate (ncols $ pA prob) id) $ pA p_aux,
             pd = V.map abs $ pd prob
           }
-  if comp_z p_aux invA_B b == 0 && V.maximum b < ncols (pA prob)
+  if comp_z p_aux invA_B b == 0 && V.all (== 0) bsol
     then Just (prob', invA_B, p, b, V.filter (< ncols (pA prob)) n)
     else Nothing
   where
@@ -100,10 +110,11 @@ simplex ::
   (Unbox a, Ord a, Fractional a, Show a) =>
   LPE a ->
   Maybe (a, Vector a)
-simplex prob = do
-  (prob', invA_B, p, b, n) <- findBasis prob
-  (invA_B', p', b', n') <- step prob' (invA_B, p, b, n)
-  let z = comp_z prob' invA_B' b'
+simplex lpe = do
+  (lpe', invA_B, p, b, n) <- findBasis $ rowEchelonLPE lpe
+  traceM $ show lpe'
+  (invA_B', p', b', n') <- step lpe' (invA_B, p, b, n)
+  let z = comp_z lpe' invA_B' b'
       sol =
         V.map snd $
           V.fromList $
@@ -122,6 +133,16 @@ simplexLP lp = do
   pure (opt, V.take (ncols $ lpA lp) sol)
   where
     lpe = convert lp
+
+simplexProg ::
+  (Unbox a, Ord a, Ord v, Fractional a, Show a) =>
+  LinearProg v a ->
+  Maybe (a, Map v a)
+simplexProg prog = do
+  (z, sol) <- simplex lpe
+  pure $ (z, M.fromList $ map (\(i, x) -> (idxMap M.! i, x)) $ zip [0 ..] $ V.toList sol)
+  where
+    (lpe, idxMap) = linearProgToLPE prog
 
 -- | One step of the simplex algorithm.
 step ::

@@ -14,6 +14,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
+import Debug.Trace
 import Futhark.MonadFreshNames
 import Futhark.Solve.LP (LSum (..), LinearProg (..), OptType (..))
 import Futhark.Solve.LP qualified as LP
@@ -22,110 +23,87 @@ import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Primitive (intByteSize)
 import Language.Futhark.Traversals
+import Language.Futhark.TypeChecker.Constraint
 import Language.Futhark.TypeChecker.Consumption qualified as Consumption
 import Language.Futhark.TypeChecker.Match
 import Language.Futhark.TypeChecker.Monad hiding (BoundV, TypeState (..), newName)
 import Language.Futhark.TypeChecker.Monad qualified as TypeM
+import Language.Futhark.TypeChecker.Rank (solveRanks)
 import Language.Futhark.TypeChecker.Types
 import Prelude hiding (mod)
 
-data TermEnv = TermEnv {}
-
-data Constraint
-  = (:==) StructType StructType
-  | OneIsZero VName VName
-  | Overloaded StructType [PrimType]
-  deriving (Show, Eq)
-
-type Constraints = [Constraint]
-
-incCounter :: TermTypeM Int
+incCounter :: ConstrainM Int
 incCounter = do
   s <- get
   put s {stateCounter = stateCounter s + 1}
   pure $ stateCounter s
 
-data TermTypeState = TermTypeState
+data ConstrainEnv = ConstrainEnv {}
+
+data ConstrainState = ConstrainState
   { stateConstraints :: Constraints,
     stateCounter :: !Int,
     stateWarnings :: Warnings,
     stateNameSource :: VNameSource
   }
 
-newtype TermTypeM a
-  = TermTypeM
+newtype ConstrainM a
+  = ConstrainM
       ( ReaderT
-          TermEnv
-          (StateT TermTypeState (Except (Warnings, TypeError)))
+          ConstrainEnv
+          (State ConstrainState)
           a
       )
   deriving
     ( Monad,
       Functor,
       Applicative,
-      MonadReader TermEnv,
-      MonadState TermTypeState
+      MonadReader ConstrainEnv,
+      MonadState ConstrainState
     )
 
-instance MonadFreshNames TermTypeM where
+instance MonadFreshNames ConstrainM where
   getNameSource = gets stateNameSource
   putNameSource vns = modify $ \env -> env {stateNameSource = vns}
 
-instance MonadError TypeError TermTypeM where
-  throwError e = TermTypeM $ do
-    ws <- gets stateWarnings
-    throwError (ws, e)
-
-  catchError (TermTypeM m) f =
-    TermTypeM $ m `catchError` f'
-    where
-      f' (_, e) = let TermTypeM m' = f e in m'
-
-runTermTypeM :: TermTypeM a -> TypeM a
-runTermTypeM (TermTypeM m) = do
-  name <- askImportName
-  outer_env <- askEnv
+runConstrainM :: ConstrainM a -> TypeM a
+runConstrainM (ConstrainM m) = do
   src <- gets TypeM.stateNameSource
-  let initial_tenv =
-        TermEnv {}
+  let initial_cenv =
+        ConstrainEnv {}
       initial_state =
-        TermTypeState
+        ConstrainState
           { stateConstraints = mempty,
             stateCounter = 0,
-            stateWarnings = mempty,
             stateNameSource = src
           }
-  case runExcept (runStateT (runReaderT m initial_tenv) initial_state) of
-    Left (ws, e) -> do
-      warnings ws
-      throwError e
-    Right (a, TermTypeState {stateNameSource, stateWarnings}) -> do
-      warnings stateWarnings
-      modify $ \s -> s {TypeM.stateNameSource = stateNameSource}
-      pure a
+      (a, ConstrainState {stateNameSource}) =
+        runState (runReaderT m initial_cenv) initial_state
+  modify $ \s -> s {TypeM.stateNameSource = stateNameSource}
+  pure a
 
-newTypeVar :: (Monoid als) => SrcLoc -> Name -> TermTypeM (TypeBase dim als)
+newTypeVar :: (Monoid als) => SrcLoc -> Name -> ConstrainM (TypeBase dim als)
 newTypeVar loc desc = do
   i <- incCounter
   v <- newName $ VName (mkTypeVarName desc i) 0
   pure $ Scalar $ TypeVar mempty (qualName v) []
 
-addConstraints :: Constraints -> TermTypeM ()
+addConstraints :: Constraints -> ConstrainM ()
 addConstraints cs = modify $ \env ->
   env
     { stateConstraints =
         stateConstraints env ++ cs
     }
 
-addConstraint :: Constraint -> TermTypeM ()
+addConstraint :: Constraint -> ConstrainM ()
 addConstraint c = addConstraints [c]
 
 -- | Check and bind type and value parameters.
 -- bindingParams ::
 --  [UncheckedTypeParam] ->
 --  [UncheckedPat ParamType] ->
---  ([TypeParam] -> [Pat ParamType] -> TermTypeM a) ->
---  TermTypeM a
+--  ([TypeParam] -> [Pat ParamType] -> ConstrainM a) ->
+--  ConstrainM a
 checkFunDef ::
   ( Name,
     Maybe UncheckedTypeExp,
@@ -143,20 +121,24 @@ checkFunDef ::
       Exp
     )
 checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
-  runTermTypeM $ do
+  runConstrainM $ do
     fname' <- newName $ VName fname 0
-    tparams' <- mapM checkTParam tparams
-    params' <- mapM checkPat params
+    -- tparams' <- mapM checkTParam tparams
+    -- params' <- mapM checkPat params
     body' <- checkExp body
     let ret = toResRet mempty $ RetType mempty $ typeOf body'
-    pure (fname', tparams', params', Nothing, ret, body')
+    -- pure (fname', tparams', params', Nothing, ret, body')
+    pure (fname', mempty, mempty, Nothing, ret, body')
 
-checkExp :: UncheckedExp -> TermTypeM Exp
+checkExp :: UncheckedExp -> ConstrainM Exp
 checkExp e = do
-  constrainExp e
-  undefined
+  e' <- constrainExp e
+  cs <- gets stateConstraints
+  ranks <- solveRanks <$> gets stateConstraints
+  traceM $ unlines ["cs: " <> show cs, "ranks: " <> show ranks]
+  pure e'
 
-constrainExp :: UncheckedExp -> TermTypeM Exp
+constrainExp :: UncheckedExp -> ConstrainM Exp
 constrainExp (Literal val loc) =
   pure $ Literal val loc
 constrainExp (IntLit val NoInfo loc) = do
@@ -166,7 +148,7 @@ constrainExp (IntLit val NoInfo loc) = do
 constrainExp e = error $ unlines [prettyString e, show e]
 
 -- checkTypeExp :: TypeExp NoInfo Name ->
--- TermTypeM (TypeExp Info VName, [VName], ResRetType, Liftedness)
+-- ConstrainM (TypeExp Info VName, [VName], ResRetType, Liftedness)
 -- checkTypeExp (TEVar (QualName [] n) loc) =
 --
 --
@@ -200,50 +182,11 @@ checkBody = checkExp
 
 checkPat = undefined
 
--- checkPat :: UncheckedPat ParamType -> TermTypeM (Pat ParamType)
+-- checkPat :: UncheckedPat ParamType -> ConstrainM (Pat ParamType)
 -- checkPat (Id n NoInfo loc) = do
 -- vn <- newID n
 -- pure $ Id vn (
 
 checkTParam = undefined
 
-----------------------------
-
-class Rank a b where
-  mkRank :: a -> LSum VName b
-
-instance (Num b) => Rank (Shape d) b where
-  mkRank = LP.constant . fromIntegral . shapeRank
-
-instance (Num b) => Rank (ScalarTypeBase dim u) b where
-  mkRank (TypeVar _ (QualName _ vn) []) =
-    LP.var vn
-  mkRank t@(TypeVar {}) = error ""
-  mkRank _ = LP.constant 0
-
-instance (Num b, Eq b) => Rank (TypeBase dim u) b where
-  mkRank (Scalar t) = mkRank t
-  mkRank (Array _ shape t) =
-    mkRank shape LP.~+~ mkRank t
-
-rankProg ::
-  (MonadFreshNames m) =>
-  forall b.
-  (Num b, Eq b) =>
-  Constraints ->
-  m (LinearProg VName b)
-rankProg cs = undefined
-  where
-    convertConstraint (t1 :== t2) =
-      pure [mkRank t1 LP.== mkRank t2]
-    convertConstraint (OneIsZero s1 s2) = do
-      b1 <- newName s1
-      b2 <- newName s2
-      pure $
-        LP.or
-          b1
-          b2
-          (LP.var s1 LP.== LP.constant 0)
-          (LP.var s2 LP.== LP.constant 0)
-    convertConstraint (Overloaded t _) =
-      pure [mkRank t LP.== LP.constant 0]
+-------------------------------------------------------------

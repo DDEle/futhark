@@ -4,9 +4,9 @@ module Futhark.Solve.BranchAndBoundTests
 where
 
 import Data.Vector.Unboxed qualified as V
+import Futhark.Solve.BranchAndBound
 import Futhark.Solve.LP
 import Futhark.Solve.Matrix qualified as M
-import Futhark.Solve.BranchAndBound
 import Test.Tasty
 import Test.Tasty.HUnit
 
@@ -14,7 +14,7 @@ tests :: TestTree
 tests =
   testGroup
     "BranchAndBoundTests"
-    [ --testCase "1" $
+    [ -- testCase "1" $
       --  let lpe =
       --        LPE
       --          { pc = V.fromList [1, 1, 0, 0, 0],
@@ -68,7 +68,7 @@ tests =
                 Just (z, sol) ->
                   and
                     [ z `approxEq` (11.8 :: Double),
-                      and $ zipWith approxEq (V.toList sol) [1, 3]
+                      and $ zipWith (Prelude.==) (V.toList sol) [1, 3]
                     ]
     ]
 

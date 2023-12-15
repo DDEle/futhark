@@ -25,7 +25,7 @@ instance (Ord a) => Semigroup (Bound a) where
 branchAndBound ::
   (Read a, Unbox a, RealFrac a, Show a) =>
   LP a ->
-  Maybe (a, Vector a)
+  Maybe (a, Vector Int)
 branchAndBound prob@(LP _ a d) = (zopt,) <$> mopt
   where
     (zopt, mopt) = step (S.singleton mempty) (negate $ read "Infinity") Nothing
@@ -38,7 +38,7 @@ branchAndBound prob@(LP _ a d) = (zopt,) <$> mopt
                 Just (z, sol)
                   | z <= zlow -> step rest zlow opt
                   | V.all isInt sol ->
-                      step rest z (Just sol)
+                      step rest z (Just $ V.map truncate sol)
                   | otherwise ->
                       let (idx, frac) =
                             V.head $ V.filter (not . isInt . snd) $ V.zip (V.generate (V.length sol) id) sol

@@ -69,6 +69,25 @@ tests =
                   and
                     [ z `approxEq` (14.08 :: Double),
                       and $ zipWith approxEq (V.toList sol) [1.3, 3.3]
+                    ],
+      testCase "5" $
+        let lp =
+              LP
+                { lpc = V.fromList [0],
+                  lpA =
+                    M.fromLists
+                      [ [1],
+                        [-1]
+                      ],
+                  lpd = V.fromList [0, 0]
+                }
+         in assertBool (show $ simplexLP lp) $
+              case simplexLP lp of
+                Nothing -> False
+                Just (z, sol) ->
+                  and
+                    [ z `approxEq` (0 :: Double),
+                      and $ zipWith approxEq (V.toList sol) [0]
                     ]
     ]
 

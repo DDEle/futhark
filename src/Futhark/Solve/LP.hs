@@ -22,16 +22,20 @@ module Futhark.Solve.LP
     (==),
     (<=),
     (>=),
+    rowEchelonLPE,
   )
 where
 
 import Data.Map (Map)
 import Data.Map qualified as Map
+import Data.Maybe
 import Data.Vector.Unboxed (Unbox, Vector)
 import Data.Vector.Unboxed qualified as V
-import Futhark.Solve.Matrix (Matrix)
+import Debug.Trace
+import Futhark.Solve.Matrix (Matrix (..))
 import Futhark.Solve.Matrix qualified as M
 import Prelude hiding (or, (<=), (==), (>=))
+import Prelude qualified
 
 -- | A linear program. 'LP c a d' represents the program
 --
@@ -62,9 +66,17 @@ data LPE a = LPE
   }
   deriving (Eq, Show)
 
+rowEchelonLPE :: (Show a, Unbox a, Fractional a, Ord a) => LPE a -> LPE a
+rowEchelonLPE (LPE c a d) =
+  LPE c (M.sliceCols (V.generate (ncols a) id) ad) (M.getCol (ncols a) ad)
+  where
+    ad =
+      M.filterRows (V.any (Prelude./= 0)) $
+        (M.rowEchelon $ a M.<|> M.fromColVector d)
+
 -- | Converts an 'LP' into an equivalent 'LPE' by introducing slack
 -- variables.
-convert :: (Num a, Unbox a) => LP a -> LPE a
+convert :: (Show a, Num a, Unbox a) => LP a -> LPE a
 convert (LP c a d) = LPE c' a' d
   where
     a' = a M.<|> M.diagonal (V.replicate (M.nrows a) 1)
@@ -177,18 +189,19 @@ linearProgToLP ::
   forall v a.
   (Unbox a, Num a, Ord v, Eq a) =>
   LinearProg v a ->
-  LP a
+  (LP a, Map Int v)
 linearProgToLP (LinearProg otype obj cs) =
-  LP c a d
+  (LP c a d, idxMap)
   where
     cs' = foldMap (convertEqCType . splitConstraint) cs
     idxMap =
       Map.fromList $
         zip [0 ..] $
-          Map.keys $
-            mconcat $
-              map (lsum . fst) cs'
-    mkRow s = V.generate (Map.size idxMap) $ \i -> s ! (idxMap Map.! i)
+          catMaybes $
+            Map.keys $
+              mconcat $
+                map (lsum . fst) cs'
+    mkRow s = V.generate (Map.size idxMap) $ \i -> s ! Just (idxMap Map.! i)
     c = mkRow $ convertObj otype obj
     a = M.fromVectors $ map (mkRow . fst) cs'
     d = V.fromList $ map snd cs'
@@ -212,18 +225,19 @@ linearProgToLPE ::
   forall v a.
   (Unbox a, Num a, Ord v, Eq a) =>
   LinearProg v a ->
-  LPE a
+  (LPE a, Map Int v)
 linearProgToLPE (LinearProg otype obj cs) =
-  LPE c a d
+  (LPE c a d, idxMap)
   where
     cs' = map (checkOnlyEqType . splitConstraint) cs
     idxMap =
       Map.fromList $
         zip [0 ..] $
-          Map.keys $
-            mconcat $
-              map (lsum . fst) cs'
-    mkRow s = V.generate (Map.size idxMap) $ \i -> s ! (idxMap Map.! i)
+          catMaybes $
+            Map.keys $
+              mconcat $
+                map (lsum . fst) cs'
+    mkRow s = V.generate (Map.size idxMap) $ \i -> s ! Just (idxMap Map.! i)
     c = mkRow $ convertObj otype obj
     a = M.fromVectors $ map (mkRow . fst) cs'
     d = V.fromList $ map snd cs'
@@ -240,3 +254,15 @@ linearProgToLPE (LinearProg otype obj cs) =
     convertObj :: OptType -> LSum v a -> LSum v a
     convertObj Maximize s = s
     convertObj Minimize s = neg s
+
+test1 :: LPE Double
+test1 =
+  LPE
+    { pc = V.fromList [5.5, 2.1],
+      pA =
+        M.fromLists
+          [ [-1, 1],
+            [8, 2]
+          ],
+      pd = V.fromList [2, 17]
+    }

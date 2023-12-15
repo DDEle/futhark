@@ -2,7 +2,8 @@ module Futhark.Solve.Matrix
   ( Matrix (..),
     toList,
     toLists,
-    fromVector,
+    fromRowVector,
+    fromColVector,
     fromVectors,
     fromLists,
     (@),
@@ -27,9 +28,14 @@ module Futhark.Solve.Matrix
     (*.),
     (.+.),
     (.-.),
+    rowEchelon,
+    filterRows,
   )
 where
 
+import Data.List qualified as L
+import Data.Map (Map)
+import Data.Map qualified as M
 import Data.Vector.Unboxed (Unbox, Vector)
 import Data.Vector.Unboxed qualified as V
 
@@ -47,18 +53,26 @@ instance (Show a, Unbox a) => Show (Matrix a) where
 
 toList :: (Unbox a) => Matrix a -> [Vector a]
 toList m =
-  map (\r -> V.slice (r * ncols m) (nrows m) (elems m)) [0 .. nrows m - 1]
+  map (\r -> V.slice (r * ncols m) (ncols m) (elems m)) [0 .. nrows m - 1]
 
 toLists :: (Unbox a) => Matrix a -> [[a]]
 toLists m =
   map (\r -> V.toList $ V.slice (r * ncols m) (ncols m) (elems m)) [0 .. nrows m - 1]
 
-fromVector :: (Unbox a) => Vector a -> Matrix a
-fromVector v =
+fromRowVector :: (Unbox a) => Vector a -> Matrix a
+fromRowVector v =
   Matrix
     { elems = v,
       nrows = 1,
       ncols = V.length v
+    }
+
+fromColVector :: (Unbox a) => Vector a -> Matrix a
+fromColVector v =
+  Matrix
+    { elems = v,
+      nrows = V.length v,
+      ncols = 1
     }
 
 fromVectors :: (Unbox a) => [Vector a] -> Matrix a
@@ -222,3 +236,69 @@ infixl 6 .-.
 (.+.) = V.zipWith (+)
 
 infixl 6 .+.
+
+swapRows :: (Unbox a) => Int -> Int -> Matrix a -> Matrix a
+swapRows r1 r2 m =
+  m
+    { elems =
+        elems m `V.update` new
+    }
+  where
+    start1 = ncols m * r1
+    start2 = ncols m * r2
+    row1 = getRow r1 m
+    row2 = getRow r2 m
+    new =
+      V.imap (\i a -> (i + start1, a)) row2
+        V.++ V.imap (\i a -> (i + start2, a)) row1
+
+-- todo: fix
+update :: (Unbox a) => Matrix a -> Vector ((Int, Int), a) -> Matrix a
+update m upds =
+  generate
+    ( \i j ->
+        case (M.fromList $ V.toList upds) M.!? (i, j) of
+          Nothing -> m ! (i, j)
+          Just x -> x
+    )
+    (nrows m)
+    (ncols m)
+
+update_ :: (Unbox a) => Matrix a -> Map (Int, Int) a -> Matrix a
+update_ m upds =
+  generate
+    ( \i j ->
+        case upds M.!? (i, j) of
+          Nothing -> m ! (i, j)
+          Just x -> x
+    )
+    (nrows m)
+    (ncols m)
+
+rowEchelon :: (Num a, Fractional a, Unbox a, Ord a) => Matrix a -> Matrix a
+rowEchelon = rowEchelon' 0 0
+  where
+    rowEchelon' h k m@(Matrix _ nr nc)
+      | h < nr && k < nc =
+          if m ! (pivot_row, k) == 0
+            then rowEchelon' h (k + 1) m
+            else rowEchelon' (h + 1) (k + 1) clear_rows_below
+      | otherwise = m
+      where
+        pivot_row =
+          fst $
+            L.maximumBy (\(_, x) (_, y) -> x `compare` y) $
+              [(r, abs (m ! (r, k))) | r <- [h .. nr - 1]]
+        m' = swapRows h pivot_row m
+        clear_rows_below =
+          update m' $
+            V.fromList $
+              [((i, k), 0) | i <- [h + 1 .. nr - 1]]
+                ++ [ ((i, j), m' ! (i, j) - (m' ! (h, j)) * f)
+                     | i <- [h + 1 .. nr - 1],
+                       let f = m' ! (i, k) / m' ! (h, k),
+                       j <- [k + 1 .. nc - 1]
+                   ]
+
+filterRows :: (Unbox a) => (Vector a -> Bool) -> Matrix a -> Matrix a
+filterRows p = fromVectors . filter p . toList
