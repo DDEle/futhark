@@ -9,7 +9,7 @@ import Data.Bifoldable (bifoldMap)
 import Data.Bifunctor
 import Data.Bitraversable
 import Data.Foldable
-import Data.List (partition, sortOn)
+import Data.List (partition, sortOn, zip4)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -755,7 +755,7 @@ etaExpand e_t e = do
       e' =
         mkApply
           e
-          (zip3 (map (fst . snd) ps) (repeat Nothing) vars)
+          (zip4 (map (fst . snd) ps) (repeat Nothing) (repeat mempty) vars)
           (AppRes (toStruct $ retType ret') ext')
   pure (params, e', ret)
   where
@@ -914,9 +914,9 @@ liftedName _ _ = "defunc"
 defuncApplyArg ::
   String ->
   (Exp, StaticVal) ->
-  (((Diet, Maybe VName), Exp), [ParamType]) ->
+  (((Diet, Maybe VName, AutoMap), Exp), [ParamType]) ->
   DefM (Exp, StaticVal)
-defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) (((d, argext), arg), _) = do
+defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) (((d, argext, _), arg), _) = do
   (arg', arg_sv) <- defuncExp arg
   let env' = alwaysMatchPatSV pat arg_sv
       dims = mempty
@@ -967,18 +967,18 @@ defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) (((d, argext
   callret <- unRetType lifted_rettype
 
   pure
-    ( mkApply fname' [(Observe, Nothing, f'), (Observe, argext, arg')] callret,
+    ( mkApply fname' [(Observe, Nothing, mempty, f'), (Observe, argext, mempty, arg')] callret,
       sv
     )
 -- If 'f' is a dynamic function, we just leave the application in
 -- place, but we update the types since it may be partially
 -- applied or return a higher-order value.
-defuncApplyArg _ (f', DynamicFun _ sv) (((d, argext), arg), argtypes) = do
+defuncApplyArg _ (f', DynamicFun _ sv) (((d, argext, _), arg), argtypes) = do
   (arg', _) <- defuncExp arg
   let (argtypes', rettype) = dynamicFunType sv argtypes
       restype = foldFunType argtypes' (RetType [] rettype)
       callret = AppRes restype []
-      apply_e = mkApply f' [(d, argext, arg')] callret
+      apply_e = mkApply f' [(d, argext, mempty, arg')] callret
   pure (apply_e, sv)
 --
 defuncApplyArg fname_s (_, sv) ((_, arg), _) =
@@ -995,7 +995,7 @@ updateReturn (AppRes ret1 ext1) (AppExp apply (Info (AppRes ret2 ext2))) =
   AppExp apply $ Info $ AppRes (combineTypeShapes ret1 ret2) (ext1 <> ext2)
 updateReturn _ e = e
 
-defuncApply :: Exp -> NE.NonEmpty ((Diet, Maybe VName), Exp) -> AppRes -> SrcLoc -> DefM (Exp, StaticVal)
+defuncApply :: Exp -> NE.NonEmpty ((Diet, Maybe VName, AutoMap), Exp) -> AppRes -> SrcLoc -> DefM (Exp, StaticVal)
 defuncApply f args appres loc = do
   (f', f_sv) <- defuncApplyFunction f (length args)
   case f_sv of
