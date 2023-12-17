@@ -97,7 +97,7 @@ findBasis prob = do
             pd = V.map abs $ pd prob
           }
   if comp_z p_aux invA_B b == 0 && V.all (== 0) bsol
-    then Just (prob', invA_B, p, b, V.filter (< ncols (pA prob)) n)
+    then Just (prob', invA_B, p, V.filter (< ncols (pA prob)) b, V.filter (< ncols (pA prob)) n)
     else Nothing
   where
     (p_aux@(LPE _ _ d_aux), b_aux, n_aux) = mkAux prob
@@ -112,7 +112,6 @@ simplex ::
   Maybe (a, Vector a)
 simplex lpe = do
   (lpe', invA_B, p, b, n) <- findBasis $ rowEchelonLPE lpe
-  traceM $ show lpe'
   (invA_B', p', b', n') <- step lpe' (invA_B, p, b, n)
   let z = comp_z lpe' invA_B' b'
       sol =
@@ -154,28 +153,41 @@ step prob (invA_B, p, b, n)
   | Just enter_idx <- menter_idx =
       let enter = n V.! enter_idx
           q_enter = comp_q_enter prob invA_B enter
-          exit_idx =
-            fst $
-              V.minimumOn snd $
-                V.map (\(i, p_', q_) -> (i, -(p_' / q_))) $
-                  V.filter (\(_, _, q_) -> q_ < 0) $
-                    V.zip3 (V.generate (V.length q_enter) id) p q_enter
-          exit = b V.! exit_idx
-          b' = b V.// [(exit_idx, enter)]
-          n' = n V.// [(enter_idx, exit)]
-          e_inv_vec =
-            V.map
-              (/ abs (q_enter V.! exit_idx))
-              (q_enter V.// [(exit_idx, 1)])
-          genF row col =
-            (if row == exit_idx then 0 else invA_B ! (row, col))
-              + (e_inv_vec V.! row) * invA_B ! (exit_idx, col)
-          invA_B' = generate genF (nrows invA_B) (ncols invA_B)
-          p' = p V.// [(exit_idx, 0)] .+. V.map (* (p V.! exit_idx)) e_inv_vec
-       in if q_enter == V.map abs q_enter
+          pq =
+            V.map (\(i, p_', q_) -> (i, -(p_' / q_))) $
+              V.filter (\(_, _, q_) -> q_ < 0) $
+                V.zip3 (V.generate (V.length q_enter) id) p q_enter
+       in if V.null pq
             then Nothing
-            else step prob (invA_B', p', b', n')
+            else
+              let exit_idx = fst $ V.minimumOn snd pq
+                  exit = b V.! exit_idx
+                  b' = b V.// [(exit_idx, enter)]
+                  n' = n V.// [(enter_idx, exit)]
+                  e_inv_vec =
+                    V.map
+                      (/ abs (q_enter V.! exit_idx))
+                      (q_enter V.// [(exit_idx, 1)])
+                  genF row col =
+                    (if row == exit_idx then 0 else invA_B ! (row, col))
+                      + (e_inv_vec V.! row) * invA_B ! (exit_idx, col)
+                  invA_B' = generate genF (nrows invA_B) (ncols invA_B)
+                  p' = p V.// [(exit_idx, 0)] .+. V.map (* (p V.! exit_idx)) e_inv_vec
+               in step prob (invA_B', p', b', n')
   | otherwise = Just (invA_B, p, b, n)
   where
     r = comp_r prob invA_B b n
     menter_idx = V.findIndex (> 0) r
+
+test = lp
+  where
+    (lp :: LP Double) =
+      LP
+        { lpc = V.fromList [0],
+          lpA =
+            fromLists
+              [ [1],
+                [-1]
+              ],
+          lpd = V.fromList [0, 0]
+        }

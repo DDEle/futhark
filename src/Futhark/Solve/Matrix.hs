@@ -75,7 +75,11 @@ fromColVector v =
       ncols = 1
     }
 
+empty :: (Unbox a) => Matrix a
+empty = Matrix mempty 0 0
+
 fromVectors :: (Unbox a) => [Vector a] -> Matrix a
+fromVectors [] = empty
 fromVectors vs =
   Matrix
     { elems = V.concat $ vs,
@@ -275,6 +279,7 @@ update_ m upds =
     (nrows m)
     (ncols m)
 
+-- TODO: maintain integrality of entries in the matrix
 rowEchelon :: (Num a, Fractional a, Unbox a, Ord a) => Matrix a -> Matrix a
 rowEchelon = rowEchelon' 0 0
   where

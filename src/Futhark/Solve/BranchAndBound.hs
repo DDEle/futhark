@@ -5,12 +5,13 @@ import Data.Maybe
 import Data.Set qualified as S
 import Data.Vector.Unboxed (Unbox, Vector)
 import Data.Vector.Unboxed qualified as V
+import Debug.Trace
 import Futhark.Solve.LP (LP (..))
 import Futhark.Solve.Matrix
 import Futhark.Solve.Simplex
 
 newtype Bound a = Bound (Maybe a, Maybe a)
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Show)
 
 instance (Ord a) => Semigroup (Bound a) where
   Bound (mlb1, mub1) <> Bound (mlb2, mub2) =
@@ -38,7 +39,7 @@ branchAndBound prob@(LP _ a d) = (zopt,) <$> mopt
                 Just (z, sol)
                   | z <= zlow -> step rest zlow opt
                   | V.all isInt sol ->
-                      step rest z (Just $ V.map truncate sol)
+                      step rest z (Just $ V.map round sol)
                   | otherwise ->
                       let (idx, frac) =
                             V.head $ V.filter (not . isInt . snd) $ V.zip (V.generate (V.length sol) id) sol
@@ -50,8 +51,9 @@ branchAndBound prob@(LP _ a d) = (zopt,) <$> mopt
                                   M.insertWith (<>) idx (Bound (Just $ fromInteger $ ceiling frac, Nothing)) next
                                 ]
                        in step (new_todo <> rest) zlow opt
-
-    isInt x = x == fromInteger (round x)
+    -- TODO: use isInt x = x == round x
+    -- requires a better 'rowEchelon' implementation for matrices
+    isInt x = (abs (fromIntegral (round x) - x)) <= 10 ^^ (-10)
     mkProblem =
       M.foldrWithKey
         ( \idx bound acc -> addBound acc idx bound
