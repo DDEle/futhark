@@ -607,7 +607,7 @@ checkExp (AppExp (Apply fe args loc) NoInfo) = do
       (d1, _, rt, argext, exts) <- checkApply loc (fname, i) t arg'
       pure
         ( (i + 1, all_exts <> exts, rt),
-          (Info (d1, argext), arg')
+          (Info (d1, argext, mempty), arg')
         )
 checkExp (AppExp (LetPat sizes pat e body loc) _) = do
   e' <- checkExp e
@@ -1177,7 +1177,7 @@ causalityCheck binding_body = do
           seqArgs known' [] = do
             void $ onExp known' f
             modify (S.fromList (appResExt res) <>)
-          seqArgs known' ((Info (_, p), x) : xs) = do
+          seqArgs known' ((Info (_, p, _), x) : xs) = do
             new_known <- collectingNewKnown $ onExp known' x
             void $ seqArgs (new_known <> known') xs
             modify ((new_known <> S.fromList (maybeToList p)) <>)

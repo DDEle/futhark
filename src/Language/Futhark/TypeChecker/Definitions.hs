@@ -82,11 +82,16 @@ runConstrainM (ConstrainM m) = do
   modify $ \s -> s {TypeM.stateNameSource = stateNameSource}
   pure a
 
-newTypeVar :: (Monoid als) => SrcLoc -> Name -> ConstrainM (TypeBase dim als)
-newTypeVar loc desc = do
+newTypeVar :: (Monoid als) => Name -> ConstrainM (TypeBase dim als)
+newTypeVar desc = do
   i <- incCounter
   v <- newName $ VName (mkTypeVarName desc i) 0
   pure $ Scalar $ TypeVar mempty (qualName v) []
+
+newShapeVar :: Name -> ConstrainM (VName)
+newShapeVar desc = do
+  i <- incCounter
+  newName $ VName (mkTypeVarName desc i) 0
 
 addConstraints :: Constraints -> ConstrainM ()
 addConstraints cs = modify $ \env ->
@@ -142,10 +147,59 @@ constrainExp :: UncheckedExp -> ConstrainM Exp
 constrainExp (Literal val loc) =
   pure $ Literal val loc
 constrainExp (IntLit val NoInfo loc) = do
-  t <- newTypeVar loc "t"
+  t <- newTypeVar "t"
   addConstraint $ Overloaded t anyNumberType
   pure $ IntLit val (Info t) loc
+constrainExp (Var (QualName [] x) NoInfo loc) = do
+  x' <- newName $ VName x 0
+  t <- newTypeVar "t"
+  pure $ Var (QualName [] x') (Info t) loc
+constrainExp (AppExp (Apply f args loc) NoInfo) = do
+  f' <- constrainExp f
+  constrainApply f' $ fmap snd args
+constrainExp (Parens e loc) = do
+  e' <- constrainExp e
+  pure $ Parens e' loc
+constrainExp (Lambda ps body rt NoInfo loc) =
+  undefined
 constrainExp e = error $ unlines [prettyString e, show e]
+
+constrainApply :: Exp -> NE.NonEmpty UncheckedExp -> ConstrainM Exp
+constrainApply f args = foldM constrainOneApply f args
+
+constrainOneApply :: Exp -> UncheckedExp -> ConstrainM Exp
+constrainOneApply f arg = do
+  arg' <- constrainExp arg
+  let f_e = frameOf arg'
+  (t1, t2) <-
+    case f_t of
+      Scalar (Arrow _ _ _ t1 (RetType _ t2)) ->
+        pure (t1, toStruct t2)
+      Scalar (TypeVar u _ _) -> do
+        t1 <- newTypeVar "t1"
+        t2 <- newTypeVar "t2"
+        addConstraint $
+          f_t
+            :== Scalar (Arrow mempty Unnamed Observe t1 $ RetType [] t2)
+        pure (t1, toStruct t2)
+  s_rep <- newShapeVar "Rep"
+  s_map <- newShapeVar "Map"
+  let rt = arrayOf (SVar s_map) t2
+  addConstraints
+    [ arrayOf (SVar s_rep <> f_e) (typeOf arg') :== arrayOf (SVar s_map <> f_f) t1,
+      OneIsZero s_rep s_map
+    ]
+  let am =
+        AutoMap
+          { autoRep = SVar s_rep,
+            autoMap = SVar s_map,
+            autoFrame = SVar s_map <> f_f
+          }
+      farg = mkApply f [(mempty, Nothing, am, arg')] (AppRes rt mempty)
+  pure farg
+  where
+    f_f = frameOf f
+    f_t = typeOf f
 
 -- checkTypeExp :: TypeExp NoInfo Name ->
 -- ConstrainM (TypeExp Info VName, [VName], ResRetType, Liftedness)

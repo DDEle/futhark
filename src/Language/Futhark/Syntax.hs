@@ -270,7 +270,7 @@ stripDims i (Shape l)
 data AutoMap = AutoMap
   { autoRep :: Shape Size,
     autoMap :: Shape Size,
-    frame :: Shape Size
+    autoFrame :: Shape Size
   }
   deriving (Eq, Show, Ord)
 

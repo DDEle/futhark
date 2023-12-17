@@ -127,7 +127,7 @@ solveRanks :: Constraints -> Maybe (Map VName Int)
 solveRanks cs =
   flip runRankM initState $ do
     (lp, idxMap) <- rankLP cs
-    traceM $ unlines ["cs: " <> show cs, "lp : " <> show lp]
+    traceM $ unlines ["rcs: " <> show cs, "rlp : " <> show lp]
     pure $ do
       (z :: Double, sol) <- branchAndBound lp
       pure $ M.fromList $ map (\(i, x) -> (idxMap M.! i, x)) $ zip [0 ..] $ V.toList sol
