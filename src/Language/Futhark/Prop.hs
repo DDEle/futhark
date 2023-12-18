@@ -81,6 +81,7 @@ module Language.Futhark.Prop
     isTypeParam,
     isSizeParam,
     matchDims,
+    distribute,
 
     -- * Un-typechecked ASTs
     UncheckedType,
@@ -305,6 +306,22 @@ arrayOf ::
   TypeBase dim NoUniqueness ->
   TypeBase dim NoUniqueness
 arrayOf = arrayOfWithAliases mempty
+
+-- Distribute shapes across function types
+distribute :: TypeBase Size u -> StructType
+distribute (Array u s t@(Arrow {})) = foldFunType params' $ RetType [] $ toRes Nonunique ret'
+  where
+    (params, ret) = unfoldFunType $ Scalar t
+    params' = map (arrayOfWithAliases mempty s) params
+    ret' = arrayOfWithAliases mempty s ret
+distribute t = toStruct t
+
+-- | Like 'arrayOf', but distributes added shapes across function types.
+-- arrayOfDistrib ::
+--  Shape dim ->
+--  TypeBase dim NoUniqueness ->
+--  TypeBase dim NoUniqueness
+-- arrayOfDistrib s t = arrayOf
 
 -- | Like 'arrayOf', but you can pass in uniqueness info of the
 -- resulting array.

@@ -9,6 +9,8 @@ import Futhark.Solve.LP
 import Futhark.Solve.Matrix qualified as M
 import Test.Tasty
 import Test.Tasty.HUnit
+import Prelude hiding (or, (<=), (==), (>=))
+import Prelude qualified
 
 tests :: TestTree
 tests =
@@ -69,6 +71,27 @@ tests =
                   and
                     [ z `approxEq` (11.8 :: Double),
                       and $ zipWith (Prelude.==) (V.toList sol) [1, 3]
+                    ],
+      testCase "8" $
+        let prog =
+              LinearProg
+                { optType = Maximize,
+                  objective = var "x1" ~+~ var "x2",
+                  constraints =
+                    [ var "x1" <= constant 10,
+                      var "x2" <= constant 5
+                    ]
+                      <> oneIsZero "b1" "b2" "x1" "x2"
+                }
+            (lp, idxmap) = linearProgToLP prog
+            lpe = convert lp
+         in assertBool
+              (unlines [show $ branchAndBound lp])
+              $ case branchAndBound lp of
+                Nothing -> False
+                Just (z, sol) ->
+                  and
+                    [ z `approxEq` (10 :: Double)
                     ]
     ]
 

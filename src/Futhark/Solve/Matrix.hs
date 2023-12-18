@@ -30,6 +30,8 @@ module Futhark.Solve.Matrix
     (.-.),
     rowEchelon,
     filterRows,
+    deleteRow,
+    deleteCol,
   )
 where
 
@@ -280,7 +282,32 @@ update_ m upds =
     (ncols m)
 
 -- TODO: maintain integrality of entries in the matrix
-rowEchelon :: (Num a, Fractional a, Unbox a, Ord a) => Matrix a -> Matrix a
+-- rowEchelon :: (Num a, Fractional a, Unbox a, Ord a) => Matrix a -> Matrix a
+-- rowEchelon = rowEchelon' 0 0
+--  where
+--    rowEchelon' h k m@(Matrix _ nr nc)
+--      | h < nr && k < nc =
+--          if m ! (pivot_row, k) == 0
+--            then rowEchelon' h (k + 1) m
+--            else rowEchelon' (h + 1) (k + 1) clear_rows_below
+--      | otherwise = m
+--      where
+--        pivot_row =
+--          fst $
+--            L.maximumBy (\(_, x) (_, y) -> x `compare` y) $
+--              [(r, abs (m ! (r, k))) | r <- [h .. nr - 1]]
+--        m' = swapRows h pivot_row m
+--        clear_rows_below =
+--          update m' $
+--            V.fromList $
+--              [((i, k), 0) | i <- [h + 1 .. nr - 1]]
+--                ++ [ ((i, j), m' ! (i, j) - (m' ! (h, j)) * f)
+--                     | i <- [h + 1 .. nr - 1],
+--                       let f = m' ! (i, k) / m' ! (h, k),
+--                       j <- [k + 1 .. nc - 1]
+--                   ]
+
+rowEchelon :: (Num a, Unbox a, Ord a) => Matrix a -> Matrix a
 rowEchelon = rowEchelon' 0 0
   where
     rowEchelon' h k m@(Matrix _ nr nc)
@@ -299,11 +326,16 @@ rowEchelon = rowEchelon' 0 0
           update m' $
             V.fromList $
               [((i, k), 0) | i <- [h + 1 .. nr - 1]]
-                ++ [ ((i, j), m' ! (i, j) - (m' ! (h, j)) * f)
+                ++ [ ((i, j), (m' ! (h, k)) * (m' ! (i, j)) - (m' ! (h, j)) * (m' ! (i, k)))
                      | i <- [h + 1 .. nr - 1],
-                       let f = m' ! (i, k) / m' ! (h, k),
                        j <- [k + 1 .. nc - 1]
                    ]
 
 filterRows :: (Unbox a) => (Vector a -> Bool) -> Matrix a -> Matrix a
 filterRows p = fromVectors . filter p . toList
+
+deleteRow :: (Unbox a) => Int -> Matrix a -> Matrix a
+deleteRow n m = sliceRows (V.generate (nrows m - 1) (\r -> if r < n then r else r + 1)) m
+
+deleteCol :: (Unbox a) => Int -> Matrix a -> Matrix a
+deleteCol n m = sliceCols (V.generate (ncols m - 1) (\c -> if c < n then c else c + 1)) m

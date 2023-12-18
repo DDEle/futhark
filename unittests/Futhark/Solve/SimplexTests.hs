@@ -4,11 +4,14 @@ module Futhark.Solve.SimplexTests
 where
 
 import Data.Vector.Unboxed qualified as V
+import Debug.Trace
 import Futhark.Solve.LP
 import Futhark.Solve.Matrix qualified as M
 import Futhark.Solve.Simplex
 import Test.Tasty
 import Test.Tasty.HUnit
+import Prelude hiding (or, (<=), (==), (>=))
+import Prelude qualified
 
 tests :: TestTree
 tests =
@@ -88,7 +91,74 @@ tests =
                   and
                     [ z `approxEq` (0 :: Double),
                       and $ zipWith approxEq (V.toList sol) [0]
+                    ],
+      testCase "6" $
+        let lp =
+              LP
+                { lpc = V.fromList [1],
+                  lpA =
+                    M.fromLists
+                      [ [1],
+                        [-1]
+                      ],
+                  lpd = V.fromList [5, 5]
+                }
+         in assertBool (show $ simplexLP lp) $
+              case simplexLP lp of
+                Nothing -> False
+                Just (z, sol) ->
+                  and
+                    [ z `approxEq` (5 :: Double),
+                      and $ zipWith approxEq (V.toList sol) [5]
+                    ],
+      testCase "7" $
+        let prog =
+              LinearProg
+                { optType = Maximize,
+                  objective = var "x1",
+                  constraints =
+                    [ var "x1" <= 10 ~*~ var "b1",
+                      var "b1" ~+~ var "b2" <= constant 1
                     ]
+                }
+            (lp, idxmap) = linearProgToLP prog
+            lpe = convert lp
+         in trace
+              (unlines [show prog, show lp, show idxmap, show lpe])
+              ( assertBool
+                  (unlines [show $ simplexLP lp])
+                  $ case simplexLP lp of
+                    Nothing -> False
+                    Just (z, sol) ->
+                      and
+                        [ z `approxEq` (10 :: Double),
+                          and $ zipWith (Prelude.==) (V.toList sol) [1, 0, 10]
+                        ]
+              ),
+      testCase "8" $
+        let prog =
+              LinearProg
+                { optType = Maximize,
+                  objective = var "x1" ~+~ var "x2",
+                  constraints =
+                    [ var "x1" <= constant 10,
+                      var "x2" <= constant 5
+                    ]
+                      <> oneIsZero "b1" "b2" "x1" "x2"
+                }
+            (lp, idxmap) = linearProgToLP prog
+            lpe = convert lp
+         in trace
+              (unlines [show prog, show lp, show idxmap, show lpe])
+              ( assertBool
+                  (unlines [show $ simplexLP lp])
+                  $ case simplexLP lp of
+                    Nothing -> False
+                    Just (z, sol) ->
+                      and
+                        [ z `approxEq` (15 :: Double)
+                        ]
+              )
     ]
 
 approxEq :: (Fractional a, Ord a) => a -> a -> Bool

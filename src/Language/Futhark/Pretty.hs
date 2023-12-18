@@ -92,6 +92,8 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (SizeExp f vn) where
 
 instance Pretty (Shape Size) where
   pretty (Shape ds) = mconcat (map (brackets . pretty) ds)
+  pretty (SVar vn) = prettyName vn
+  pretty (SConcat s1 s2) = pretty s1 <+> pretty s2
 
 instance Pretty (Shape ()) where
   pretty (Shape ds) = mconcat $ replicate (length ds) "[]"

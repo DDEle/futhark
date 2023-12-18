@@ -242,9 +242,13 @@ instance Foldable Shape where
 
 instance Traversable Shape where
   traverse f (Shape ds) = Shape <$> traverse f ds
+  traverse _ (SVar x) = pure $ SVar x
+  traverse f (SConcat s1 s2) = SConcat <$> traverse f s1 <*> traverse f s2
 
 instance Functor Shape where
   fmap f (Shape ds) = Shape $ map f ds
+  fmap _ (SVar x) = SVar x
+  fmap f (SConcat s1 s2) = fmap f s1 `SConcat` fmap f s2
 
 instance Semigroup (Shape dim) where
   Shape l1 <> Shape l2 = Shape $ l1 ++ l2
@@ -257,7 +261,9 @@ instance Monoid (Shape dim) where
 
 -- | The number of dimensions contained in a shape.
 shapeRank :: Shape dim -> Int
-shapeRank = length . shapeDims
+shapeRank (Shape ds) = length ds
+shapeRank (SConcat s1 s2) = shapeRank s1 + shapeRank s2
+shapeRank _ = 0 -- FIX
 
 -- | @stripDims n shape@ strips the outer @n@ dimensions from
 -- @shape@, returning 'Nothing' if this would result in zero or

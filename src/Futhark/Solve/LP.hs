@@ -8,6 +8,7 @@ module Futhark.Solve.LP
     cval,
     bin,
     or,
+    oneIsZero,
     (~+~),
     (~-~),
     (~*~),
@@ -26,6 +27,7 @@ module Futhark.Solve.LP
   )
 where
 
+import Data.List qualified as L
 import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Maybe
@@ -84,19 +86,39 @@ convert (LP c a d) = LPE c' a' d
 
 -- | Linear sum of variables.
 newtype LSum v a = LSum {lsum :: (Map (Maybe v) a)}
-  deriving (Show, Eq)
+  deriving (Eq)
+
+instance (Show v, Show a) => Show (LSum v a) where
+  show (LSum m) =
+    L.intercalate
+      " + "
+      $ map
+        ( \(k, a) ->
+            case k of
+              Nothing -> show a
+              Just k' -> show a <> "*" <> show k'
+        )
+      $ Map.toList m
 
 instance Functor (LSum v) where
   fmap f (LSum m) = LSum $ fmap f m
 
 -- | Type of constraint
 data CType = Equal | LessEq
-  deriving (Show, Eq)
+  deriving (Eq)
+
+instance Show CType where
+  show (Equal) = "="
+  show (LessEq) = "<="
 
 -- | A constraint for a linear program.
 data Constraint v a
   = Constraint CType (LSum v a) (LSum v a)
-  deriving (Show, Eq)
+  deriving (Eq)
+
+instance (Show a, Show v) => Show (Constraint v a) where
+  show (Constraint t l r) =
+    show l <> " " <> show t <> " " <> show r
 
 data OptType = Maximize | Minimize
   deriving (Show, Eq)
@@ -107,10 +129,29 @@ data LinearProg v a = LinearProg
     objective :: LSum v a,
     constraints :: [Constraint v a]
   }
-  deriving (Show, Eq)
+  deriving (Eq)
+
+instance (Show v, Show a) => Show (LinearProg v a) where
+  show (LinearProg opt obj cs) =
+    unlines $
+      [ show opt,
+        show obj,
+        "subject to:"
+      ]
+        ++ map show cs
 
 bigM :: (Num a) => a
-bigM = 10 ^ 9
+bigM = 10 ^ 3
+
+oneIsZero :: (Eq a, Num a, Ord v) => v -> v -> v -> v -> [Constraint v a]
+oneIsZero b1 b2 x1 x2 =
+  mkC b1 x1
+    <> mkC b2 x2
+    <> [(var b1 ~+~ var b2) <= constant 1]
+  where
+    mkC b x =
+      [ var x <= bigM ~*~ var b
+      ]
 
 or :: (Eq a, Num a, Ord v) => v -> v -> Constraint v a -> Constraint v a -> [Constraint v a]
 or b1 b2 c1 c2 =
@@ -162,7 +203,7 @@ cval = (! Nothing)
 infixl 6 ~+~
 
 (~-~) :: (Eq a, Num a, Ord v) => LSum v a -> LSum v a -> LSum v a
-(LSum x) ~-~ (LSum y) = normalize $ LSum $ Map.unionWith (-) x y
+x ~-~ y = x ~+~ (neg y)
 
 infixl 6 ~-~
 
