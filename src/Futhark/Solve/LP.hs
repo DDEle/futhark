@@ -223,9 +223,6 @@ neg (LSum x) = LSum $ fmap negate x
 
 -- | Converts a linear program given with a list of constraints
 -- into the standard form.
---
--- TODO: Add Gaussian elimination to make sure the matrix in the
--- resulting 'LP' has linearly-independent rows.
 linearProgToLP ::
   forall v a.
   (Unbox a, Num a, Ord v, Eq a) =>

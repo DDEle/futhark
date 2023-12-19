@@ -115,11 +115,7 @@ rankLP cs = do
       addToObjSet s1
       addToObjSet s2
       pure $
-        LP.or
-          b1
-          b2
-          (LP.var s1 LP.== LP.constant 0)
-          (LP.var s2 LP.== LP.constant 0)
+        LP.oneIsZero b1 b2 s1 s2
     convertConstraint (Overloaded t _) =
       pure [mkRank t LP.== LP.constant 0]
 
@@ -127,7 +123,7 @@ solveRanks :: Constraints -> Maybe (Map VName Int)
 solveRanks cs =
   flip runRankM initState $ do
     (lp, idxMap) <- rankLP cs
-    traceM $ unlines ["rcs: " <> show cs, "rlp : " <> show lp]
+    traceM $ unlines ["rcs: " <> show cs, "rlp : " <> show lp, "idxMap", show idxMap]
     pure $ do
       (z :: Double, sol) <- branchAndBound lp
       pure $ M.fromList $ map (\(i, x) -> (idxMap M.! i, x)) $ zip [0 ..] $ V.toList sol
