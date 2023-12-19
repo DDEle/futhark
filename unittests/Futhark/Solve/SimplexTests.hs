@@ -158,6 +158,30 @@ tests =
                       and
                         [ z `approxEq` (15 :: Double)
                         ]
+              ),
+      testCase "9" $
+        let prog =
+              LinearProg
+                { optType = Maximize,
+                  objective = var "x1" ~+~ var "x2",
+                  constraints =
+                    [ var "x1" <= constant 10,
+                      var "x2" <= constant 5
+                    ]
+                      <> or "b1" "b2" (var "x1" == constant 0) (var "x2" == constant 0)
+                }
+            (lp, idxmap) = linearProgToLP prog
+            lpe = convert lp
+         in trace
+              (unlines [show prog, show lp, show idxmap, show lpe])
+              ( assertBool
+                  (unlines [show $ simplexLP lp])
+                  $ case simplexLP lp of
+                    Nothing -> False
+                    Just (z, sol) ->
+                      and
+                        [ z `approxEq` (15 :: Double)
+                        ]
               )
     ]
 

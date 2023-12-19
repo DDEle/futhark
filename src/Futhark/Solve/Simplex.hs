@@ -9,6 +9,7 @@ where
 import Data.List qualified as L
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
+import Data.Maybe
 import Data.Vector.Unboxed (Unbox, Vector)
 import Data.Vector.Unboxed qualified as V
 import Debug.Trace
@@ -121,8 +122,8 @@ findBasis prob = do
                     V.imap (curry id) b
            in fixDegenerateBasis og_prob col prob' (invA_B', p', b', n)
       | Just exit_idx <- mexit_idx,
-        (enter_idx, _) <- V.head (elim_row exit_idx) =
-          let enter = n V.! enter_idx
+        (enter, _) <- V.head (elim_row exit_idx) =
+          let enter_idx = fromJust $ V.findIndex (== enter) n
               exit = b V.! exit_idx
            in fixDegenerateBasis og_prob col prob $
                 pivot prob (invA_B, p, b, n) (enter_idx, enter) (exit_idx, exit)

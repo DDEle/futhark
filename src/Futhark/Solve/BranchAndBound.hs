@@ -51,6 +51,7 @@ branchAndBound prob@(LP _ a d) = (zopt,) <$> mopt
                                   M.insertWith (<>) idx (Bound (Just $ fromInteger $ ceiling frac, Nothing)) next
                                 ]
                        in step (new_todo <> rest) zlow opt
+
     -- TODO: use isInt x = x == round x
     -- requires a better 'rowEchelon' implementation for matrices
     isInt x = (abs (fromIntegral (round x) - x)) <= 10 ^^ (-10)
