@@ -9,13 +9,64 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* `f16.copysign`, `f32.copysign`, `f64.copysign`.
-
 ### Removed
 
 ### Changed
 
 ### Fixed
+
+## [0.25.13]
+
+### Added
+
+* Incremental flattening of `map`-`scan` compositions with nested
+  parallelism (similar to the logic for `map`-`reduce` compositions
+  that we have had for years).
+
+* `futhark script`, for running FutharkScript expressions from the
+  command line.
+
+* `futhark repl` now prints out a message when it ignores a breakpoint
+  during initialisation. (#2098)
+
+### Fixed
+
+* Flattening of `scatter` with multi-dimensional elements (#2089).
+
+* Some instances of not-actually-irregular allocations were mistakenly
+  interpreted as irregular. Fixing this was a dividend of the memory
+  representation simplifications of 0.25.12.
+
+* Obscure issue related to expansion of shared memory allocations (#2092).
+
+* A crash in alias checking under some rare circumstances (#2096).
+
+* Mishandling of existential sizes for top level constants. (#2099)
+
+* Compiler crash when generating code for copying nothing at all. (#2100)
+
+## [0.25.12]
+
+### Added
+
+* `f16.copysign`, `f32.copysign`, `f64.copysign`.
+
+* Trailing commas are now allowed for all syntactical elements that
+  involve comma-separation. (#2068)
+
+* The C API now allows destruction and construction of sum types (with
+  some caveats). (#2074)
+
+* An overall reduction in memory copies, through simplifying the
+  internal representation.
+
+### Fixed
+
+* C API would define distinct entry point types for Futhark types that
+  differed only in naming of sizes (#2080).
+
+* `==` and `!=` on sum types with array payloads. Constructing them is
+  now a bit slower, though. (#2081)
 
 * Somewhat obscure simplification error caused by neglecting to update
   metadata when removing dead scatter outputs.
@@ -26,6 +77,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Size inference did incomplete level/scope checking, which could
   result in circular sizes, which usually manifested as the type
   checker going into an infinite loop (#2073).
+
+* The OpenCL backend now more gracefully handles lack of platform.
 
 ## [0.25.11]
 
